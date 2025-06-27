@@ -1,26 +1,37 @@
 package com.cybersecurity.auth_service.service;
 
 import com.cybersecurity.auth_service.model.Usuario;
+import com.cybersecurity.auth_service.repository.UsuarioRepository;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
-import java.util.ArrayList;
 import java.util.List;
 
 @Service
 public class UsuarioService {
-    private final List<Usuario> usuarios = new ArrayList<>();
+
+    @Autowired
+    private UsuarioRepository usuarioRepository;
+
+    @Autowired
+    private PasswordEncoder passwordEncoder;
 
     public void registrarUsuario(Usuario usuario) {
-        usuarios.add(usuario);
+        usuario.setPassword(passwordEncoder.encode(usuario.getPassword()));
+        usuarioRepository.save(usuario);
     }
 
     public Usuario buscarUsuario(String username, String password) {
-        return usuarios.stream()
-                .filter(u -> u.getUsername().equals(username) && u.getPassword().equals(password))
-                .findFirst().orElse(null);
+        Usuario user = usuarioRepository.findById(username).orElse(null);
+        if (user != null && passwordEncoder.matches(password, user.getPassword())) {
+            return user;
+        }
+        return null;
     }
 
     public List<Usuario> obtenerUsuarios() {
-        return usuarios;
+        return usuarioRepository.findAll();
     }
 }
+
