@@ -1,90 +1,82 @@
-version: "3.9"
+name: CI/CD Multi-servicio Java + Docker
 
-services:
-  postgres:
-    image: postgres:15
-    environment:
-      POSTGRES_DB: scannerdb
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: sa
-    ports:
-      - "5432:5432"
-    restart: always
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
 
-  auth-service:
-    build:
-      context: ./backend/auth-service
-      dockerfile: Dockerfile
-    ports:
-      - "8080:8080"
-    depends_on:
-      - postgres
-    environment:
-      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/scannerdb
-      SPRING_DATASOURCE_USERNAME: postgres
-      SPRING_DATASOURCE_PASSWORD: sa
-    restart: always
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
 
-  scan-service:
-    build:
-      context: ./backend/scan-service
-      dockerfile: Dockerfile
-    ports:
-      - "8082:8082"
-    depends_on:
-      - zap
-    environment:
-      ZAP_API_URL: http://zap:8090
-    restart: always
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
 
-  client-info-service:
-    build:
-      context: ./backend/client-info-service
-      dockerfile: Dockerfile
-    ports:
-      - "8083:8083"
-    restart: always
+    # Login a Docker Hub
+    - name: Login to DockerHub
+      uses: docker/login-action@v3
+      with:
+        username: ${{ secrets.DOCKERHUB_USERNAME }}
+        password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-  report-service:
-    build:
-      context: ./backend/report-service
-      dockerfile: Dockerfile
-    ports:
-      - "8084:8084"
-    restart: always
+    # Build y testea cada microservicio Spring Boot
+    - name: Build and test Auth Service
+      run: |
+        cd backend/auth-service
+        ./mvnw clean package -DskipTests=false
+        cd ../..
 
-  api-gateway:
-    build:
-      context: ./backend/api-gateway
-      dockerfile: Dockerfile
-    ports:
-      - "8081:8081"
-    depends_on:
-      - auth-service
-      - scan-service
-      - report-service
-      - client-info-service
-    restart: always
+    - name: Build and test Scan Service
+      run: |
+        cd backend/scan-service
+        ./mvnw clean package -DskipTests=false
+        cd ../..
 
-  frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-    ports:
-      - "3000:80"
-    depends_on:
-      - api-gateway
-    environment:
-      - VITE_API_BASE_URL=http://api-gateway:8081
-    restart: always
+    - name: Build and test Client Info Service
+      run: |
+        cd backend/client-info-service
+        ./mvnw clean package -DskipTests=false
+        cd ../..
 
-  zap:
-    image: ghcr.io/zaproxy/zaproxy:stable
-    command: >
-      zap.sh -daemon -host 0.0.0.0 -port 8090
-      -config api.disablekey=true
-      -config 'api.addrs.addr.name=.*'
-      -config 'api.addrs.addr.regex=true'
-    ports:
-      - "8090:8090"
-    restart: always
+    - name: Build and test Report Service
+      run: |
+        cd backend/report-service
+        ./mvnw clean package -DskipTests=false
+        cd ../..
+
+    - name: Build and test API Gateway
+      run: |
+        cd backend/api-gateway
+        ./mvnw clean package -DskipTests=false
+        cd ../..
+
+    # Build frontend
+    - name: Build frontend
+      run: |
+        cd frontend
+        npm install
+        npm run build
+        cd ..
+
+    # Construye y pushea imágenes Docker para cada servicio
+    - name: Build and push Docker images
+      run: |
+        docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/auth-service:latest ./backend/auth-service
+        docker push ${{ secrets.DOCKERHUB_USERNAME }}/auth-service:latest
+
+        docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/scan-service:latest ./backend/scan-service
+        docker push ${{ secrets.DOCKERHUB_USERNAME }}/scan-service:latest
+
+        docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/client-info-service:latest ./backend/client-info-service
+        docker push ${{ secrets.DOCKERHUB_USERNAME }}/client-info-service:latest
+
+        docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/report-service:latest ./backend/report-service
+        docker push ${{ secrets.DOCKERHUB_USERNAME }}/report-service:latest
+
+        docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/api-gateway:latest ./backend/api-gateway
+        docker push ${{ secrets.DOCKERHUB_USERNAME }}/api-gateway:latest
+
+        docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/frontend:latest ./frontend
+        docker push ${{ secrets.DOCKERHUB_USERNAME }}/frontend:latest
